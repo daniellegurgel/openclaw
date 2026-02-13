@@ -12,6 +12,7 @@ import { handleApproveCommand } from "./commands-approve.js";
 import { handleBashCommand } from "./commands-bash.js";
 import { handleCompactCommand } from "./commands-compact.js";
 import { handleConfigCommand, handleDebugCommand } from "./commands-config.js";
+import { handleHandoffCommand } from "./commands-handoff.js";
 import {
   handleCommandsListCommand,
   handleContextCommand,
@@ -32,6 +33,7 @@ import {
 import { handleSubagentsCommand } from "./commands-subagents.js";
 import { handleTtsCommands } from "./commands-tts.js";
 import { routeReply } from "./route-reply.js";
+import { isHandoffActive } from "../../sessions/handoff-store.js";
 
 let HANDLERS: CommandHandler[] | null = null;
 
@@ -60,6 +62,7 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
       handleStopCommand,
       handleCompactCommand,
       handleAbortTrigger,
+      handleHandoffCommand,
     ];
   }
   const resetMatch = params.command.commandBodyNormalized.match(/^\/(new|reset)(?:\s|$)/);
@@ -116,6 +119,19 @@ export async function handleCommands(params: HandleCommandsParams): Promise<Comm
     const result = await handler(params, allowTextCommands);
     if (result) {
       return result;
+    }
+  }
+
+  // Handoff guard: block messages from numbers under active handoff.
+  const senderE164 = params.ctx.SenderE164?.trim();
+  if (senderE164) {
+    const handoffEntry = isHandoffActive(senderE164);
+    if (handoffEntry) {
+      const pauseMessage =
+        params.cfg.handoff?.pauseMessage ??
+        "Ola! No momento um atendente humano esta cuidando da sua conversa. Aguarde, por favor.";
+      logVerbose(`Handoff guard: blocking message from ${senderE164} (expires ${new Date(handoffEntry.expiresAt).toISOString()})`);
+      return { shouldContinue: false, reply: { text: pauseMessage } };
     }
   }
 

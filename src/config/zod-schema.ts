@@ -590,6 +590,14 @@ export const OpenClawSchema = z
       })
       .strict()
       .optional(),
+    handoff: z
+      .object({
+        defaultMinutes: z.number().int().positive().optional(),
+        pauseMessage: z.string().optional(),
+        adminNumbers: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {
