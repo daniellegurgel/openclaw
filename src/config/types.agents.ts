@@ -62,6 +62,21 @@ export type AgentConfig = {
     prune?: SandboxPruneSettings;
   };
   tools?: AgentToolsConfig;
+
+  /**
+   * Busca de perfil do contato via webhook antes do LLM responder.
+   * Quando configurado, o gateway consulta uma URL externa (ex: n8n/Supabase)
+   * para obter dados do remetente e injeta o resultado no contexto da mensagem.
+   * Modificação por Danielle Gurgel — Neurotrading
+   */
+  contactLookup?: {
+    /** URL do webhook (ex: "http://localhost:5678/webhook/buscar-aluno"). O parâmetro ?phone=E164 é adicionado automaticamente. */
+    url: string;
+    /** Tempo máximo de espera pela resposta do webhook em milissegundos (padrão: 4000). */
+    timeoutMs?: number;
+    /** Tempo de vida do cache por número de telefone em minutos (padrão: 30). */
+    cacheTtlMinutes?: number;
+  };
 };
 
 export type AgentsConfig = {

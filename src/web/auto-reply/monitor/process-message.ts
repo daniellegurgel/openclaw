@@ -4,6 +4,7 @@ import type { loadConfig } from "../../../config/config.js";
 import type { getChildLogger } from "../../../logging.js";
 import type { resolveAgentRoute } from "../../../routing/resolve-route.js";
 import type { WebInboundMsg } from "../types.js";
+import { resolveAgentConfig } from "../../../agents/agent-scope.js";
 import { resolveIdentityNamePrefix } from "../../../agents/identity.js";
 import { resolveChunkMode, resolveTextChunkLimit } from "../../../auto-reply/chunk.js";
 import { shouldComputeCommandAuthorized } from "../../../auto-reply/command-detection.js";
@@ -28,6 +29,7 @@ import {
 import { logVerbose, shouldLogVerbose } from "../../../globals.js";
 import { readChannelAllowFromStore } from "../../../pairing/pairing-store.js";
 import { jidToE164, normalizeE164 } from "../../../utils.js";
+import { buscarPerfilContato } from "../../../sessions/cache_perfil_contato.js";
 import { newConnectionId } from "../../reconnect.js";
 import { formatError } from "../../session.js";
 import { deliverWebReply } from "../deliver-reply.js";
@@ -191,6 +193,25 @@ export async function processMessage(params: {
     params.echoForget(combinedEchoKey);
     return false;
   }
+
+  // --- Início: Busca de perfil do contato (Danielle Gurgel — Neurotrading) ---
+  // Consulta webhook externo (ex: n8n → Supabase) para obter dados do remetente.
+  // O resultado é injetado no combinedBody antes de ir para o LLM.
+  // Configuração vem do openclaw.json → agents.list[].contactLookup
+  const agentCfg = resolveAgentConfig(params.cfg, params.route.agentId);
+  const lookupCfg = agentCfg?.contactLookup;
+  if (lookupCfg?.url && params.msg.senderE164) {
+    const perfil = await buscarPerfilContato({
+      telefone: params.msg.senderE164,
+      url: lookupCfg.url,
+      timeoutMs: lookupCfg.timeoutMs,
+      cacheTtlMinutes: lookupCfg.cacheTtlMinutes,
+    });
+    if (perfil) {
+      combinedBody = `[Perfil do contato]\n${perfil}\n[/Perfil do contato]\n\n${combinedBody}`;
+    }
+  }
+  // --- Fim: Busca de perfil do contato ---
 
   // Send ack reaction immediately upon message receipt (post-gating)
   maybeSendAckReaction({

@@ -455,6 +455,17 @@ export const AgentEntrySchema = z
       .optional(),
     sandbox: AgentSandboxSchema,
     tools: AgentToolsSchema,
+    /**
+     * Busca de perfil do contato — Modificação por Danielle Gurgel — Neurotrading
+     */
+    contactLookup: z
+      .object({
+        url: z.string(),
+        timeoutMs: z.number().int().positive().optional(),
+        cacheTtlMinutes: z.number().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
