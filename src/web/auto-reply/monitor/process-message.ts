@@ -206,6 +206,7 @@ export async function processMessage(params: {
       url: lookupCfg.url,
       timeoutMs: lookupCfg.timeoutMs,
       cacheTtlMinutes: lookupCfg.cacheTtlMinutes,
+      warn: params.replyLogger.warn.bind(params.replyLogger),
     });
     if (perfil) {
       combinedBody = `[Perfil do contato]\n${perfil}\n[/Perfil do contato]\n\n${combinedBody}`;
