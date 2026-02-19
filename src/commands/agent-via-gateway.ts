@@ -1,3 +1,24 @@
+/**
+ * Comando CLI "openclaw agent" via gateway.
+ *
+ * Modificado em 2026-02-19 por Danielle Gurgel.
+ *
+ * Correção: roteamento de sessão outbound (--to) agora usa o sistema moderno
+ * de rotas por peer (resolveAgentRoute / buildAgentSessionKey), o mesmo que o
+ * caminho inbound.  Antes, todas as DMs outbound colapsavam para a session key
+ * genérica "agent:main:main" — isso impedia que a conversa iniciada via
+ * prospecção (outbound) compartilhasse a sessão com a resposta do lead
+ * (inbound).
+ *
+ * Visão de negócio: no módulo de prospecção automática, o agente Fellipe envia
+ * a primeira mensagem para o lead via n8n → HTTP bridge → CLI ("openclaw agent
+ * --to +55…").  Quando o lead responde pelo WhatsApp, a mensagem inbound já
+ * criava a session key correta (ex.: "agent:fellipe:whatsapp:dm:+5571…").
+ * Porém o outbound usava "agent:main:main", resultando em duas sessões
+ * separadas — o agente perdia o contexto da campanha na resposta.  Com esta
+ * correção, outbound e inbound usam a mesma session key, garantindo
+ * continuidade da conversa e do roteiro de campanha.
+ */
 import type { CliDeps } from "../cli/deps.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { listAgentIds } from "../agents/agent-scope.js";
@@ -6,6 +27,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import { withProgress } from "../cli/progress.js";
 import { loadConfig } from "../config/config.js";
 import { callGateway, randomIdempotencyKey } from "../gateway/call.js";
+import { resolveAgentRoute, buildAgentSessionKey } from "../routing/resolve-route.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import {
   GATEWAY_CLIENT_MODES,
@@ -106,14 +128,35 @@ export async function agentViaGatewayCommand(opts: AgentCliOpts, runtime: Runtim
   const timeoutSeconds = parseTimeoutSeconds({ cfg, timeout: opts.timeout });
   const gatewayTimeoutMs = Math.max(10_000, (timeoutSeconds + 30) * 1000);
 
-  const sessionKey = resolveSessionKeyForRequest({
-    cfg,
-    agentId,
-    to: opts.to,
-    sessionId: opts.sessionId,
-  }).sessionKey;
-
   const channel = normalizeMessageChannel(opts.channel) ?? DEFAULT_CHAT_CHANNEL;
+
+  // ── Session key resolution ──────────────────────────────────────────
+  // Outbound (--to): usa roteador moderno por peer, produzindo chaves como
+  //   "agent:fellipe:whatsapp:dm:+5571…"  (mesmo que o inbound).
+  // Demais casos: mantém resolução legada para compatibilidade.
+  let sessionKey: string | undefined;
+  if (opts.to?.trim()) {
+    const route = resolveAgentRoute({
+      cfg,
+      channel,
+      peer: { kind: "dm", id: opts.to.trim() },
+    });
+    const effectiveAgentId = agentId || route.agentId;
+    sessionKey = buildAgentSessionKey({
+      agentId: effectiveAgentId,
+      channel,
+      peer: { kind: "dm", id: opts.to.trim() },
+      dmScope: cfg.session?.dmScope ?? "main",
+      identityLinks: cfg.session?.identityLinks,
+    }).toLowerCase();
+  } else {
+    sessionKey = resolveSessionKeyForRequest({
+      cfg,
+      agentId,
+      to: opts.to,
+      sessionId: opts.sessionId,
+    }).sessionKey;
+  }
   const idempotencyKey = opts.runId?.trim() || randomIdempotencyKey();
 
   const response = await withProgress(
