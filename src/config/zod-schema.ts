@@ -598,6 +598,21 @@ export const OpenClawSchema = z
       })
       .strict()
       .optional(),
+    integrations: z
+      .object({
+        chatwoot: z
+          .object({
+            enabled: z.boolean().optional(),
+            baseUrl: z.string().optional(),
+            apiToken: z.string().optional(),
+            accountId: z.number().optional(),
+            inboxId: z.number().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((cfg, ctx) => {

@@ -13,6 +13,7 @@ import type {
 } from "./types.gateway.js";
 import type { HandoffConfig } from "./types.handoff.js";
 import type { HooksConfig } from "./types.hooks.js";
+import type { ChatwootConfig } from "../integrations/ponte-chatwoot.js";
 import type { MemoryConfig } from "./types.memory.js";
 import type {
   AudioConfig,
@@ -99,6 +100,9 @@ export type OpenClawConfig = {
   gateway?: GatewayConfig;
   memory?: MemoryConfig;
   handoff?: HandoffConfig;
+  integrations?: {
+    chatwoot?: ChatwootConfig;
+  };
 };
 
 export type ConfigValidationIssue = {

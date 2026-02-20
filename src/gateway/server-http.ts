@@ -1,3 +1,25 @@
+/**
+ * Servidor HTTP/HTTPS principal do Gateway.
+ *
+ * Este arquivo é o dispatcher central do Gateway: sobe HTTP/HTTPS, roteia
+ * requests por prioridade (hooks, tools, Slack, OpenAI/OpenResponses, Canvas,
+ * Control UI), aplica regras de autenticação do Canvas e configura o upgrade
+ * WebSocket para conexões em tempo real.
+ *
+ * Ele recebe todas as requisições que chegam ao processo e decide para onde
+ * encaminhar cada uma. Se nenhuma rota bate, retorna 404.
+ *
+ * Alteração (Danielle Gurgel, 2026-02-20):
+ *   - Adicionado subpath "handoff" no sistema de hooks para integração com o
+ *     Chatwoot. Quando um agente humano clica "Resolver" ou "Reabrir" no painel
+ *     do Chatwoot, o webhook aciona activateHandoff/deactivateHandoff,
+ *     pausando ou retomando o bot para aquele número de telefone.
+ *   - A autenticação do subpath "handoff" aceita token como segmento do path
+ *     (/hooks/handoff/<token>) porque o Chatwoot não suporta enviar headers
+ *     customizados nos webhooks. Token no path vaza menos em logs de proxy do
+ *     que query param. Os demais subpaths mantêm a exigência de token via header.
+ */
+
 import type { TlsOptions } from "node:tls";
 import type { WebSocketServer } from "ws";
 import {
@@ -19,6 +41,8 @@ import {
 } from "../canvas-host/a2ui.js";
 import { loadConfig } from "../config/config.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
+// Ponte Chatwoot: handoff via botões Resolver/Reabrir (Danielle Gurgel, 2026-02-20)
+import { processarEventoHandoffChatwoot } from "../integrations/ponte-chatwoot.js";
 import { authorizeGatewayConnect, isLocalDirectRequest, type ResolvedGatewayAuth } from "./auth.js";
 import {
   handleControlUiAvatarRequest,
@@ -147,6 +171,17 @@ export function createHooksRequestHandler(
       return false;
     }
 
+    // Extrair subpath e resolver token antes da autenticação.
+    // O subpath "handoff" aceita token como segmento do path (/hooks/handoff/<token>)
+    // porque o Chatwoot não suporta enviar headers customizados nos webhooks.
+    // Token no path é mais seguro que query param — vaza menos em logs de proxy.
+    // (Danielle Gurgel, 2026-02-20)
+    const rawSubPath = url.pathname.slice(basePath.length).replace(/^\/+/, "");
+    const subPath = rawSubPath.startsWith("handoff/") ? "handoff" : rawSubPath;
+    const pathToken = rawSubPath.startsWith("handoff/")
+      ? rawSubPath.slice("handoff/".length).trim() || undefined
+      : undefined;
+
     if (url.searchParams.has("token")) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -156,7 +191,7 @@ export function createHooksRequestHandler(
       return true;
     }
 
-    const token = extractHookToken(req);
+    const token = extractHookToken(req) ?? pathToken;
     if (!token || token !== hooksConfig.token) {
       res.statusCode = 401;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -171,8 +206,6 @@ export function createHooksRequestHandler(
       res.end("Method Not Allowed");
       return true;
     }
-
-    const subPath = url.pathname.slice(basePath.length).replace(/^\/+/, "");
     if (!subPath) {
       res.statusCode = 404;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -209,6 +242,21 @@ export function createHooksRequestHandler(
       }
       const runId = dispatchAgentHook(normalized.value);
       sendJson(res, 202, { ok: true, runId });
+      return true;
+    }
+
+    // Ponte Chatwoot: handoff via botões Resolver/Reabrir
+    // Recebe webhook do Chatwoot e aciona activateHandoff/deactivateHandoff
+    // (Danielle Gurgel, 2026-02-20)
+    if (subPath === "handoff") {
+      const result = await processarEventoHandoffChatwoot(
+        payload as Record<string, unknown>,
+      );
+      if (!result.ok) {
+        sendJson(res, 400, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, action: result.action });
       return true;
     }
 

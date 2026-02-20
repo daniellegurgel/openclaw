@@ -8,6 +8,7 @@ import { normalizePollInput, type PollInput } from "../polls.js";
 import { toWhatsappJid } from "../utils.js";
 import { type ActiveWebSendOptions, requireActiveWebListener } from "./active-listener.js";
 import { loadWebMedia } from "./media.js";
+import { espelharMensagemSaida } from "../integrations/ponte-chatwoot.js";
 
 const outboundLog = createSubsystemLogger("gateway/channels/whatsapp").child("outbound");
 
@@ -83,6 +84,25 @@ export async function sendMessageWhatsApp(
       `Sent message ${messageId} -> ${jid}${options.mediaUrl ? " (media)" : ""} (${durationMs}ms)`,
     );
     logger.info({ jid, messageId }, "sent message");
+
+    // --- Ponte Chatwoot: espelha mensagem de saída (bot → cliente) ---
+    // Alteração: Daniele Gurgel, 2026-02-20 (Build 4)
+    // Motivo: capturar mensagens enviadas via CRM/n8n que não passam pelo
+    //   auto-reply (process-message.ts). Sem esse hook, mensagens do CRM
+    //   apareciam no WhatsApp mas não no Chatwoot.
+    // Guards:
+    //   - Pegadinha 3: usa jid (não to) pra filtrar grupo — jid SEMPRE tem @g.us se for grupo
+    //   - Pegadinha 4: usa body (texto original), não text (convertido pra WhatsApp)
+    //   - Pegadinha 5: não espelha heartbeat ("HEARTBEAT_OK"), com trim() pra segurança
+    //   - Pegadinha 2: normalização de telefone é feita dentro de espelharMensagemSaida
+    if (
+      body &&
+      !jid.includes("@g.us") &&
+      !body.trim().startsWith("HEARTBEAT")
+    ) {
+      espelharMensagemSaida(cfg, to, body);
+    }
+
     return { messageId, toJid: jid };
   } catch (err) {
     logger.error(

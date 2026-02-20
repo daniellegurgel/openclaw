@@ -30,6 +30,7 @@ import { logVerbose, shouldLogVerbose } from "../../../globals.js";
 import { readChannelAllowFromStore } from "../../../pairing/pairing-store.js";
 import { jidToE164, normalizeE164 } from "../../../utils.js";
 import { buscarPerfilContato } from "../../../sessions/cache_perfil_contato.js";
+import { espelharMensagemEntrada, espelharMensagemSaida } from "../../../integrations/ponte-chatwoot.js";
 import { newConnectionId } from "../../reconnect.js";
 import { formatError } from "../../session.js";
 import { deliverWebReply } from "../deliver-reply.js";
@@ -250,6 +251,19 @@ export async function processMessage(params: {
     whatsappInboundLog.debug(`Inbound body: ${elide(combinedBody, 400)}`);
   }
 
+  // --- Ponte Chatwoot: espelha mensagem de entrada (cliente → bot) ---
+  // Alteração: Daniele Gurgel, 2026-02-20
+  // Motivo: espelhar mensagens recebidas no Chatwoot para monitoramento.
+  // Lógica: só espelha DMs (não grupos). Fire-and-forget — não bloqueia o bot.
+  if (params.msg.chatType !== "group") {
+    espelharMensagemEntrada(
+      params.cfg,
+      params.msg.senderE164 ?? params.msg.from,
+      params.msg.body,
+      params.msg.pushName ?? params.msg.senderName,
+    );
+  }
+
   const dmRouteTarget =
     params.msg.chatType !== "group"
       ? (() => {
@@ -403,6 +417,18 @@ export async function processMessage(params: {
           if (shouldLogVerbose()) {
             const preview = payload.text != null ? elide(payload.text, 400) : "<media>";
             whatsappOutboundLog.debug(`Reply body: ${preview}${hasMedia ? " (media)" : ""}`);
+          }
+          // --- Ponte Chatwoot: espelha resposta de saída (bot → cliente) ---
+          // Alteração: Daniele Gurgel, 2026-02-20
+          // Motivo: espelhar respostas automáticas (auto-reply) no Chatwoot.
+          // Nota: este hook cobre APENAS auto-reply. Mensagens enviadas via CRM/n8n
+          // passam pelo outbound.ts (porta de saída), que tem seu próprio hook.
+          if (params.msg.chatType !== "group" && payload.text) {
+            espelharMensagemSaida(
+              params.cfg,
+              params.msg.senderE164 ?? params.msg.from,
+              payload.text,
+            );
           }
         }
       },
