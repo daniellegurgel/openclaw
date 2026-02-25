@@ -14,6 +14,7 @@ import type {
 import type { HandoffConfig } from "./types.handoff.js";
 import type { HooksConfig } from "./types.hooks.js";
 import type { ChatwootConfig } from "../integrations/ponte-chatwoot.js";
+import type { MetaCloudApiConfig } from "../integrations/neurotrading-meta-cloud-api.js";
 import type { MemoryConfig } from "./types.memory.js";
 import type {
   AudioConfig,
@@ -102,6 +103,7 @@ export type OpenClawConfig = {
   handoff?: HandoffConfig;
   integrations?: {
     chatwoot?: ChatwootConfig;
+    metaCloudApi?: MetaCloudApiConfig;
   };
 };
 

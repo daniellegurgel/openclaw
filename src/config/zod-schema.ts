@@ -610,6 +610,17 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        metaCloudApi: z
+          .object({
+            enabled: z.boolean().optional(),
+            phoneNumberId: z.string().optional(),
+            accessToken: z.string().optional(),
+            appSecret: z.string().optional(),
+            verifyToken: z.string().optional(),
+            selfNumber: z.string().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

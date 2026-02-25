@@ -182,6 +182,15 @@ export function createHooksRequestHandler(
       ? rawSubPath.slice("handoff/".length).trim() || undefined
       : undefined;
 
+    // Meta Cloud API tem auth própria (HMAC-SHA256), não usa Bearer token.
+    // Precisa entrar ANTES do token check (Meta não envia Bearer) e ANTES do
+    // method check (Meta envia GET para verificação de webhook).
+    // (Danielle Gurgel, 2026-02-24)
+    if (rawSubPath === "meta-whatsapp") {
+      const { handleMetaWhatsAppWebhook } = await import("./neurotrading-hooks-meta-whatsapp.js");
+      return await handleMetaWhatsAppWebhook(req, res, { url, logHooks });
+    }
+
     if (url.searchParams.has("token")) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
