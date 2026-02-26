@@ -52,6 +52,7 @@ import {
   getHookType,
   isExternalHookSession,
 } from "../../security/external-content.js";
+import { parseTemplateDirective } from "../../auto-reply/reply/neurotrading-monta-template-meta.js";
 import { resolveCronDeliveryPlan } from "../delivery.js";
 import { resolveDeliveryTarget } from "./delivery-target.js";
 import {
@@ -398,6 +399,18 @@ export async function runCronIsolatedAgentTurn(params: {
   }
 
   const payloads = runResult.payloads ?? [];
+
+  // Parsear diretiva [[template:...]] do primeiro payload — o agente decide
+  // o template e as variáveis, o sistema empacota no channelData.
+  // Danielle Gurgel, 2026-02-25
+  if (payloads.length > 0) {
+    const beforeText = payloads[0]?.text;
+    payloads[0] = parseTemplateDirective(payloads[0]);
+    const afterCd = payloads[0]?.channelData;
+    logWarn(
+      `[cron:${params.job.id}] parseTemplateDirective: beforeText="${(beforeText ?? "").slice(0, 80)}" channelData=${afterCd ? JSON.stringify(afterCd).slice(0, 200) : "none"} deliveryRequested=${deliveryPlan.requested} to=${deliveryPlan.to ?? "?"} channel=${deliveryPlan.channel ?? "?"}`,
+    );
+  }
 
   // Update token+model fields in the session store.
   {

@@ -37,6 +37,7 @@ export type {
   ChannelMeta,
   ChannelOutboundAdapter,
   ChannelOutboundContext,
+  ChannelOutboundPayloadContext,
   ChannelOutboundTargetMode,
   ChannelPairingAdapter,
   ChannelPollContext,
@@ -62,6 +63,7 @@ export type {
   OpenClawPluginApi,
   OpenClawPluginService,
   OpenClawPluginServiceContext,
+  PluginLogger,
 } from "../plugins/types.js";
 export type {
   GatewayRequestHandler,
@@ -372,3 +374,15 @@ export type { ProcessedLineMessage } from "../line/markdown-to-line.js";
 
 // Media utilities
 export { loadWebMedia, type WebMediaResult } from "../web/media.js";
+
+// Canal: API Meta (Neurotrading) — entrega via Graph API do Facebook
+// Usado pela extensão neurotrading-api-meta para campanhas pelo número 1404.
+// (Danielle Gurgel, 2026-02-25)
+export {
+  enviarTextoCloudApi,
+  enviarMidiaCloudApi,
+  enviarTemplateCloudApi,
+  type MetaCloudApiConfig,
+  type TemplateParams,
+} from "../integrations/neurotrading-meta-cloud-api.js";
+export { espelharMensagemSaida } from "../integrations/ponte-chatwoot.js";

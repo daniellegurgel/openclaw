@@ -1,0 +1,9 @@
+{
+  "id": "neurotrading-api-meta",
+  "channels": ["api-meta"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

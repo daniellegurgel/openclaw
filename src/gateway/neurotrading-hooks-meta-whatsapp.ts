@@ -307,10 +307,14 @@ async function processarMensagemCloudApi(
   const msgSintetica = construirMensagemSintetica(mensagem, metaCfg);
   const senderE164 = msgSintetica.senderE164!;
 
-  // Resolver rota do agente (accountId "default" para casar com bindings)
+  // Resolver rota do agente.
+  // Canal "api-meta" (não "whatsapp") para que a session key bata com o outbound
+  // da campanha. Sem isso, o agente sofre "amnésia" — não encontra o contexto.
+  // accountId "default" para casar com bindings existentes.
+  // (Danielle Gurgel, 2026-02-25)
   const route = resolveAgentRoute({
     cfg,
-    channel: "whatsapp",
+    channel: "api-meta",
     accountId: "default",
     peer: { kind: "dm", id: senderE164 },
   });

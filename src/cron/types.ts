@@ -35,6 +35,8 @@ export type CronPayload =
       channel?: CronMessageChannel;
       to?: string;
       bestEffortDeliver?: boolean;
+      /** Dados específicos do canal — injetado nos payloads antes do delivery (ex: template). */
+      channelData?: Record<string, unknown>;
     };
 
 export type CronPayloadPatch =
@@ -50,6 +52,7 @@ export type CronPayloadPatch =
       channel?: CronMessageChannel;
       to?: string;
       bestEffortDeliver?: boolean;
+      channelData?: Record<string, unknown>;
     };
 
 export type CronJobState = {

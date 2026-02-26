@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/neurotrading-api-meta",
+  "version": "2026.2.4",
+  "description": "Canal de entrega via API Meta (Graph API do Facebook) — Neurotrading campanhas pelo número 1404",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  }
+}

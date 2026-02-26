@@ -42,8 +42,8 @@
  * =============================================================================
  */
 
-import crypto from "node:crypto";
 import type { AnyMessageContent } from "@whiskeysockets/baileys";
+import crypto from "node:crypto";
 import type { WebInboundMessage } from "../web/inbound/types.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizeE164 } from "../utils.js";
@@ -165,15 +165,21 @@ export function extrairMensagensDoWebhook(
 
   const entries = Array.isArray(payload.entry) ? payload.entry : [];
   for (const entry of entries) {
-    if (!entry || typeof entry !== "object") { continue; }
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
     const changes = Array.isArray((entry as Record<string, unknown>).changes)
       ? ((entry as Record<string, unknown>).changes as unknown[])
       : [];
 
     for (const change of changes) {
-      if (!change || typeof change !== "object") { continue; }
+      if (!change || typeof change !== "object") {
+        continue;
+      }
       const value = (change as Record<string, unknown>).value;
-      if (!value || typeof value !== "object") { continue; }
+      if (!value || typeof value !== "object") {
+        continue;
+      }
 
       const messages = Array.isArray((value as Record<string, unknown>).messages)
         ? ((value as Record<string, unknown>).messages as unknown[])
@@ -185,7 +191,9 @@ export function extrairMensagensDoWebhook(
         ? ((value as Record<string, unknown>).contacts as unknown[])
         : [];
       for (const contact of contacts) {
-        if (!contact || typeof contact !== "object") { continue; }
+        if (!contact || typeof contact !== "object") {
+          continue;
+        }
         const c = contact as Record<string, unknown>;
         const cWaId = typeof c.wa_id === "string" ? c.wa_id : "";
         if (cWaId && c.profile && typeof c.profile === "object") {
@@ -197,11 +205,15 @@ export function extrairMensagensDoWebhook(
       }
 
       for (const msg of messages) {
-        if (!msg || typeof msg !== "object") { continue; }
+        if (!msg || typeof msg !== "object") {
+          continue;
+        }
         const m = msg as Record<string, unknown>;
 
         const waId = typeof m.from === "string" ? m.from.trim() : "";
-        if (!waId) { continue; }
+        if (!waId) {
+          continue;
+        }
 
         // Filtro de eco: ignora mensagens do próprio número
         if (selfNormalizado && normalizarParaComparacao(waId) === selfNormalizado) {
@@ -212,25 +224,37 @@ export function extrairMensagensDoWebhook(
         // Extrair texto — suporta mensagens de texto simples
         let texto = "";
         if (m.type === "text" && m.text && typeof m.text === "object") {
-          texto = typeof (m.text as Record<string, unknown>).body === "string"
-            ? ((m.text as Record<string, unknown>).body as string)
-            : "";
+          texto =
+            typeof (m.text as Record<string, unknown>).body === "string"
+              ? ((m.text as Record<string, unknown>).body as string)
+              : "";
         } else if (m.type === "button" && m.button && typeof m.button === "object") {
           // Resposta a botão (ex: Quick Reply do template)
-          texto = typeof (m.button as Record<string, unknown>).text === "string"
-            ? ((m.button as Record<string, unknown>).text as string)
-            : "";
+          texto =
+            typeof (m.button as Record<string, unknown>).text === "string"
+              ? ((m.button as Record<string, unknown>).text as string)
+              : "";
         } else if (m.type === "interactive" && m.interactive && typeof m.interactive === "object") {
           // Resposta a lista interativa ou botão de resposta
           const interactive = m.interactive as Record<string, unknown>;
-          if (interactive.type === "button_reply" && interactive.button_reply && typeof interactive.button_reply === "object") {
-            texto = typeof (interactive.button_reply as Record<string, unknown>).title === "string"
-              ? ((interactive.button_reply as Record<string, unknown>).title as string)
-              : "";
-          } else if (interactive.type === "list_reply" && interactive.list_reply && typeof interactive.list_reply === "object") {
-            texto = typeof (interactive.list_reply as Record<string, unknown>).title === "string"
-              ? ((interactive.list_reply as Record<string, unknown>).title as string)
-              : "";
+          if (
+            interactive.type === "button_reply" &&
+            interactive.button_reply &&
+            typeof interactive.button_reply === "object"
+          ) {
+            texto =
+              typeof (interactive.button_reply as Record<string, unknown>).title === "string"
+                ? ((interactive.button_reply as Record<string, unknown>).title as string)
+                : "";
+          } else if (
+            interactive.type === "list_reply" &&
+            interactive.list_reply &&
+            typeof interactive.list_reply === "object"
+          ) {
+            texto =
+              typeof (interactive.list_reply as Record<string, unknown>).title === "string"
+                ? ((interactive.list_reply as Record<string, unknown>).title as string)
+                : "";
           }
         }
 
@@ -245,7 +269,8 @@ export function extrairMensagensDoWebhook(
 
         // Cloud API envia timestamp como string de segundos Unix.
         // Convertemos para milissegundos (padrão do OpenClaw — ver monitor.ts:198-199).
-        const timestampSec = typeof m.timestamp === "string" ? parseInt(m.timestamp, 10) : undefined;
+        const timestampSec =
+          typeof m.timestamp === "string" ? parseInt(m.timestamp, 10) : undefined;
         const timestampMs = timestampSec && !isNaN(timestampSec) ? timestampSec * 1000 : undefined;
 
         mensagens.push({
@@ -328,9 +353,58 @@ export async function enviarTextoCloudApi(
 }
 
 /**
+ * Extrai link de mídia de um campo do payload Baileys.
+ * Aceita { url: "..." } (Baileys) ou string direta.
+ */
+function extrairLinkMidia(campo: unknown): string | undefined {
+  if (typeof campo === "string") {
+    return campo;
+  }
+  if (campo && typeof campo === "object") {
+    const obj = campo as Record<string, unknown>;
+    if (typeof obj.url === "string") {
+      return obj.url;
+    }
+    if (typeof obj.link === "string") {
+      return obj.link;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Detecta tipo de mídia pela extensão da URL.
+ * Retorna "image", "audio", "video" ou "document".
+ */
+function detectarTipoMidia(url: string): "image" | "audio" | "video" | "document" {
+  const lower = url.toLowerCase().split("?")[0] ?? "";
+  if (/\.(jpe?g|png|webp|gif)$/.test(lower)) {
+    return "image";
+  }
+  if (/\.(mp3|ogg|opus|m4a|aac|amr|wav)$/.test(lower)) {
+    return "audio";
+  }
+  if (/\.(mp4|3gp|avi|mov|mkv|webm)$/.test(lower)) {
+    return "video";
+  }
+  return "document";
+}
+
+/**
  * Envia mídia via Graph API do Meta.
- * Suporta imagens via URL (mediaUrl no AnyMessageContent).
- * Para o MVP, faz fallback para texto se não conseguir extrair a URL.
+ *
+ * Suporta imagem, áudio, vídeo e documento via URL.
+ * Detecta o tipo de mídia pela extensão da URL ou pela estrutura do payload.
+ * Se não conseguir extrair mídia, faz fallback para texto.
+ *
+ * Formato do payload (estilo Baileys):
+ *   { image: { url }, caption? }   → imagem
+ *   { audio: { url } }             → áudio
+ *   { video: { url }, caption? }   → vídeo
+ *   { document: { url }, fileName?, caption? } → documento
+ *
+ * Ou formato direto da extensão:
+ *   { mediaUrl: "https://...", caption? } → detecta pelo URL
  */
 export async function enviarMidiaCloudApi(
   config: MetaCloudApiConfig,
@@ -346,29 +420,107 @@ export async function enviarMidiaCloudApi(
   const to = destinatario.replace(/\D/g, "");
   const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
 
-  // Tentar extrair URL de mídia do payload Baileys
   const p = payload as Record<string, unknown>;
+  const caption = typeof p.caption === "string" ? p.caption : undefined;
   let mediaBody: Record<string, unknown> | null = null;
 
-  if (p.image && typeof p.image === "object") {
-    const img = p.image as Record<string, unknown>;
-    if (typeof img.url === "string") {
+  // 1. Imagem (formato Baileys: { image: { url }, caption? })
+  const imgLink = extrairLinkMidia(p.image);
+  if (imgLink) {
+    mediaBody = {
+      messaging_product: "whatsapp",
+      to,
+      type: "image",
+      image: { link: imgLink, ...(caption ? { caption } : {}) },
+    };
+  }
+
+  // 2. Áudio (formato Baileys: { audio: { url } })
+  if (!mediaBody) {
+    const audioLink = extrairLinkMidia(p.audio);
+    if (audioLink) {
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "audio",
+        audio: { link: audioLink },
+      };
+    }
+  }
+
+  // 3. Vídeo (formato Baileys: { video: { url }, caption? })
+  if (!mediaBody) {
+    const videoLink = extrairLinkMidia(p.video);
+    if (videoLink) {
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "video",
+        video: { link: videoLink, ...(caption ? { caption } : {}) },
+      };
+    }
+  }
+
+  // 4. Documento (formato Baileys: { document: { url }, fileName?, caption? })
+  if (!mediaBody) {
+    const docLink = extrairLinkMidia(p.document);
+    if (docLink) {
+      const fileName = typeof p.fileName === "string" ? p.fileName : undefined;
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "document",
+        document: {
+          link: docLink,
+          ...(caption ? { caption } : {}),
+          ...(fileName ? { filename: fileName } : {}),
+        },
+      };
+    }
+  }
+
+  // 5. Formato direto: { mediaUrl: "https://..." } — detecta tipo pela extensão
+  if (!mediaBody && typeof p.mediaUrl === "string") {
+    const tipo = detectarTipoMidia(p.mediaUrl);
+    const link = p.mediaUrl;
+    if (tipo === "image") {
       mediaBody = {
         messaging_product: "whatsapp",
         to,
         type: "image",
-        image: { link: img.url, caption: typeof p.caption === "string" ? p.caption : undefined },
+        image: { link, ...(caption ? { caption } : {}) },
+      };
+    } else if (tipo === "audio") {
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "audio",
+        audio: { link },
+      };
+    } else if (tipo === "video") {
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "video",
+        video: { link, ...(caption ? { caption } : {}) },
+      };
+    } else {
+      mediaBody = {
+        messaging_product: "whatsapp",
+        to,
+        type: "document",
+        document: { link, ...(caption ? { caption } : {}) },
       };
     }
   }
 
   // Fallback: se não conseguiu extrair mídia, envia caption como texto
   if (!mediaBody) {
-    const caption = typeof p.caption === "string" ? p.caption : "";
     if (caption) {
+      log.warn(`Mídia não reconhecida para ${to}, enviando caption como texto`);
       return enviarTextoCloudApi(config, destinatario, caption);
     }
-    log.warn("Mídia não suportada para Cloud API, descartando payload");
+    log.warn(`Mídia não suportada para Cloud API (to=${to}), descartando payload`);
     return { messageId: "unsupported-media" };
   }
 
@@ -406,6 +558,128 @@ export async function enviarMidiaCloudApi(
 }
 
 // =============================================================================
+// Envio de template via Graph API (leads frios — fora da janela de 24h)
+// =============================================================================
+
+/**
+ * Parâmetros para envio de template aprovado pelo Meta.
+ *
+ * POR QUE TEMPLATES:
+ * A API Meta exige template aprovado para a primeira mensagem a um lead que
+ * não interagiu nas últimas 24h (lead frio). Texto livre (type: "text") é
+ * rejeitado com erro 131047.
+ *
+ * QUEM USA:
+ *   - Extensão api-meta (agente envia primeiro toque como template)
+ *   - n8n (workflow de campanha envia template direto, sem passar pelo agente)
+ *
+ * VARIÁVEIS:
+ * O array `variables` mapeia para {{1}}, {{2}}, {{3}} no corpo do template.
+ * A ordem importa — {{1}} = variables[0], {{2}} = variables[1], etc.
+ *
+ * HEADER COM IMAGEM (opcional):
+ * Se `headerImageUrl` for informado, o template precisa ter um header do tipo
+ * IMAGE no Meta Business Manager. A URL deve ser HTTPS e acessível publicamente.
+ */
+export type TemplateParams = {
+  /** Nome do template aprovado no Meta Business Manager (ex: "prospeccao_fellipe_v1") */
+  name: string;
+  /** Código do idioma (ex: "pt_BR") */
+  language: string;
+  /** Variáveis do corpo — {{1}}, {{2}}, etc. (ordem importa) */
+  variables?: string[];
+  /** URL de imagem para header do tipo IMAGE (opcional, deve ser HTTPS público) */
+  headerImageUrl?: string;
+};
+
+/**
+ * Envia uma mensagem de template aprovado via Graph API do Meta.
+ *
+ * Templates são obrigatórios para leads frios (fora da janela de 24h).
+ * Após o lead responder, a janela abre e o agente pode usar texto livre.
+ *
+ * Retorna o messageId do Meta (wamid.*).
+ * Lança erro com o código do Meta se o template não existir ou estiver rejeitado.
+ */
+export async function enviarTemplateCloudApi(
+  config: MetaCloudApiConfig,
+  destinatario: string,
+  template: TemplateParams,
+): Promise<{ messageId: string }> {
+  const phoneNumberId = config.phoneNumberId;
+  const accessToken = config.accessToken;
+  if (!phoneNumberId || !accessToken) {
+    throw new Error("Meta Cloud API: phoneNumberId ou accessToken não configurado");
+  }
+
+  // Normalizar destinatário: Graph API espera só dígitos (sem "+")
+  const to = destinatario.replace(/\D/g, "");
+  const url = `${GRAPH_API_BASE}/${phoneNumberId}/messages`;
+
+  // Montar components do template
+  const components: Array<Record<string, unknown>> = [];
+
+  // Header com imagem (opcional)
+  if (template.headerImageUrl) {
+    components.push({
+      type: "header",
+      parameters: [{ type: "image", image: { link: template.headerImageUrl } }],
+    });
+  }
+
+  // Variáveis do corpo ({{1}}, {{2}}, ...)
+  if (template.variables && template.variables.length > 0) {
+    components.push({
+      type: "body",
+      parameters: template.variables.map((v) => ({ type: "text", text: v })),
+    });
+  }
+
+  const body = {
+    messaging_product: "whatsapp",
+    to,
+    type: "template",
+    template: {
+      name: template.name,
+      language: { code: template.language },
+      ...(components.length > 0 ? { components } : {}),
+    },
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GRAPH_API_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      const resBody = await res.text().catch(() => "");
+      throw new Error(`Graph API template ${res.status}: ${resBody}`);
+    }
+
+    let messageId = "unknown";
+    try {
+      const data = (await res.json()) as { messages?: Array<{ id?: string }> };
+      messageId = data.messages?.[0]?.id ?? "unknown";
+    } catch {
+      log.warn(`Resposta 2xx da Graph API (template) mas JSON inválido (to=${to})`);
+    }
+    log.info(`Template '${template.name}' enviado via Cloud API para ${to} (id: ${messageId})`);
+    return { messageId };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// =============================================================================
 // Construção da WebInboundMessage sintética
 // =============================================================================
 
@@ -423,7 +697,9 @@ export function construirMensagemSintetica(
   config: MetaCloudApiConfig,
 ): WebInboundMessage {
   if (!config.selfNumber) {
-    throw new Error("Meta Cloud API: selfNumber não configurado — impossível construir mensagem sintética");
+    throw new Error(
+      "Meta Cloud API: selfNumber não configurado — impossível construir mensagem sintética",
+    );
   }
   const senderE164 = normalizeE164(mensagem.waId);
 

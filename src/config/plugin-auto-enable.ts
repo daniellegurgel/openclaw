@@ -312,6 +312,13 @@ function resolveConfiguredPlugins(
     if (!channelId) {
       continue;
     }
+    // Pular canais que não correspondem a plugins conhecidos (ex: canais
+    // servidos por extensões como neurotrading-api-meta → canal "api-meta").
+    // Extensões já se habilitam via plugins.entries com seu próprio ID.
+    // Danielle Gurgel, 2026-02-25
+    if (!CHANNEL_PLUGIN_IDS.includes(channelId)) {
+      continue;
+    }
     if (isChannelConfigured(cfg, channelId, env)) {
       changes.push({
         pluginId: channelId,
