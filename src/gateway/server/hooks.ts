@@ -41,6 +41,8 @@ export function createGatewayHooksRequestHandler(params: {
     thinking?: string;
     timeoutSeconds?: number;
     allowUnsafeExternalContent?: boolean;
+    channelData?: Record<string, unknown>;
+    agent?: string;
   }) => {
     const sessionKey = value.sessionKey.trim() ? value.sessionKey.trim() : `hook:${randomUUID()}`;
     const mainSessionKey = resolveMainSessionKeyFromConfig();
@@ -65,6 +67,7 @@ export function createGatewayHooksRequestHandler(params: {
         channel: value.channel,
         to: value.to,
         allowUnsafeExternalContent: value.allowUnsafeExternalContent,
+        channelData: value.channelData,
       },
       state: { nextRunAtMs: now },
     };
@@ -79,6 +82,7 @@ export function createGatewayHooksRequestHandler(params: {
           job,
           message: value.message,
           sessionKey,
+          agentId: value.agent,
           lane: "cron",
         });
         const summary = result.summary?.trim() || result.error?.trim() || result.status;

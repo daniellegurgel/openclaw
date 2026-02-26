@@ -42,7 +42,7 @@ import {
 import { loadConfig } from "../config/config.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
 // Ponte Chatwoot: handoff via botões Resolver/Reabrir (Danielle Gurgel, 2026-02-20)
-import { processarEventoHandoffChatwoot } from "../integrations/ponte-chatwoot.js";
+import { processarEventoHandoffChatwootAssinado } from "../integrations/ponte-chatwoot.js";
 import { authorizeGatewayConnect, isLocalDirectRequest, type ResolvedGatewayAuth } from "./auth.js";
 import {
   handleControlUiAvatarRequest,
@@ -59,6 +59,7 @@ import {
   normalizeHookHeaders,
   normalizeWakePayload,
   readJsonBody,
+  readRawBody,
   resolveHookChannel,
   resolveHookDeliver,
 } from "./hooks.js";
@@ -85,6 +86,8 @@ type HookDispatchers = {
     thinking?: string;
     timeoutSeconds?: number;
     allowUnsafeExternalContent?: boolean;
+    channelData?: Record<string, unknown>;
+    agent?: string;
   }) => string;
 };
 
@@ -222,6 +225,39 @@ export function createHooksRequestHandler(
       return true;
     }
 
+    // -------------------------------------------------------------------
+    // Ponte Chatwoot: handoff via botões Resolver/Reabrir
+    // HMAC-SHA256 com rawBody — precisa rodar ANTES do readJsonBody geral.
+    // Header esperado: X-Chatwoot-Signature (Chatwoot nativo) ou
+    //                  X-OpenClaw-Signature (configuração manual).
+    // Segredo: o mesmo hooks token que já autentica a URL.
+    // (Danielle Gurgel, 2026-02-25)
+    // -------------------------------------------------------------------
+    // Ponte Chatwoot: handoff via botões Resolver/Reabrir
+    // Usa processarEventoHandoffChatwootAssinado que faz HMAC → parse → processo
+    // numa única chamada (rawBody antes de qualquer parse).
+    // (Danielle Gurgel, 2026-02-25)
+    if (subPath === "handoff") {
+      const rawBody = await readRawBody(req, hooksConfig.maxBodyBytes);
+      if (!rawBody || rawBody.length === 0) {
+        sendJson(res, 400, { ok: false, error: "body ausente" });
+        return true;
+      }
+
+      const sigHeader = req.headers["x-chatwoot-signature"] ?? req.headers["x-openclaw-signature"];
+      const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
+      if (!sig) {
+        logHooks.warn("Handoff: header de assinatura ausente");
+        sendJson(res, 401, { ok: false, error: "assinatura ausente" });
+        return true;
+      }
+
+      const result = await processarEventoHandoffChatwootAssinado(rawBody, sig, hooksConfig.token);
+      const status = result.ok ? 200 : (result.error === "assinatura inválida" ? 401 : 400);
+      sendJson(res, status, result);
+      return true;
+    }
+
     const body = await readJsonBody(req, hooksConfig.maxBodyBytes);
     if (!body.ok) {
       const status = body.error === "payload too large" ? 413 : 400;
@@ -251,21 +287,6 @@ export function createHooksRequestHandler(
       }
       const runId = dispatchAgentHook(normalized.value);
       sendJson(res, 202, { ok: true, runId });
-      return true;
-    }
-
-    // Ponte Chatwoot: handoff via botões Resolver/Reabrir
-    // Recebe webhook do Chatwoot e aciona activateHandoff/deactivateHandoff
-    // (Danielle Gurgel, 2026-02-20)
-    if (subPath === "handoff") {
-      const result = await processarEventoHandoffChatwoot(
-        payload as Record<string, unknown>,
-      );
-      if (!result.ok) {
-        sendJson(res, 400, { ok: false, error: result.error });
-        return true;
-      }
-      sendJson(res, 200, { ok: true, action: result.action });
       return true;
     }
 

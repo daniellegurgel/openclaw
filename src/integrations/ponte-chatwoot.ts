@@ -50,6 +50,7 @@
  * =============================================================================
  */
 
+import crypto from "node:crypto";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { activateHandoff, deactivateHandoff } from "../sessions/handoff-store.js";
 
@@ -68,12 +69,77 @@ export type ChatwootConfig = {
 };
 
 // =============================================================================
-// Caches em memória (telefone normalizado → id do Chatwoot)
+// Cache com TTL e limite de entradas (Danielle Gurgel, 2026-02-25)
+// Substitui Map<string,number> puro para evitar crescimento indefinido.
+// TTL padrão 24h; ao atingir maxEntradas, expira expirados e depois os
+// mais antigos (FIFO do Map, que mantém ordem de inserção).
+// =============================================================================
+class CacheTTL<K, V> {
+  private mapa = new Map<K, { valor: V; expira: number }>();
+  private readonly ttlMs: number;
+  private readonly maxEntradas: number;
+
+  constructor(ttlMinutos: number, maxEntradas: number = 10_000) {
+    this.ttlMs = ttlMinutos * 60_000;
+    this.maxEntradas = maxEntradas;
+  }
+
+  get(chave: K): V | undefined {
+    const entrada = this.mapa.get(chave);
+    if (!entrada) {
+      return undefined;
+    }
+    if (Date.now() > entrada.expira) {
+      this.mapa.delete(chave);
+      return undefined;
+    }
+    return entrada.valor;
+  }
+
+  set(chave: K, valor: V): void {
+    if (this.mapa.size >= this.maxEntradas) {
+      this.evictar();
+    }
+    this.mapa.set(chave, { valor, expira: Date.now() + this.ttlMs });
+  }
+
+  delete(chave: K): void {
+    this.mapa.delete(chave);
+  }
+
+  /** Remove expirados; se ainda cheio, descarta os 20% mais antigos (FIFO). */
+  private evictar(): void {
+    const agora = Date.now();
+    for (const [k, v] of this.mapa) {
+      if (agora > v.expira) {
+        this.mapa.delete(k);
+      }
+    }
+    if (this.mapa.size >= this.maxEntradas) {
+      const excesso = this.mapa.size - Math.floor(this.maxEntradas * 0.8);
+      let removidos = 0;
+      for (const k of this.mapa.keys()) {
+        if (removidos >= excesso) {
+          break;
+        }
+        this.mapa.delete(k);
+        removidos++;
+      }
+    }
+  }
+}
+
+// =============================================================================
+// Caches em memória com TTL (telefone normalizado → id do Chatwoot)
 // Evita chamadas repetidas à API para o mesmo contato/conversa.
 // A chave é SEMPRE o telefone normalizado via normalizarTelefoneE164().
+// TTL 24h + max 10k entradas para evitar crescimento indefinido.
+// (Danielle Gurgel, 2026-02-25)
 // =============================================================================
-const cacheContatos = new Map<string, number>();
-const cacheConversas = new Map<string, number>();
+const CACHE_TTL_MINUTOS = 1440; // 24h
+const CACHE_MAX_ENTRADAS = 10_000;
+const cacheContatos = new CacheTTL<string, number>(CACHE_TTL_MINUTOS, CACHE_MAX_ENTRADAS);
+const cacheConversas = new CacheTTL<string, number>(CACHE_TTL_MINUTOS, CACHE_MAX_ENTRADAS);
 
 // =============================================================================
 // Funções internas (helpers)
@@ -83,29 +149,87 @@ const cacheConversas = new Map<string, number>();
  * Normaliza um telefone para formato E.164 puro (só dígitos, sem +, sem @).
  * Essa função é CRÍTICA para evitar duplicação de contatos/conversas no cache.
  *
- * Exemplos:
- *   "+5511999999999"           → "5511999999999"
- *   "5511999999999"            → "5511999999999"
- *   "5511999999999@s.whatsapp.net" → "5511999999999"
- *   "55 11 99999-9999"         → "5511999999999"
+ * Inclui correção do 9° dígito para celulares brasileiros: o JID do WhatsApp
+ * às vezes omite o "9" adicionado pela Anatel (ex: 558486340456 → 5584986340456).
  *
- * Correção do item 1 da revisão de código: sem essa normalização,
- * o mesmo telefone em formatos diferentes criava duplicatas no Chatwoot.
+ * Exemplos:
+ *   "+5511999999999"               → "5511999999999"  (já tem 9°, 13 dígitos)
+ *   "558486340456"                 → "5584986340456"   (insere 9° dígito)
+ *   "5511999999999@s.whatsapp.net" → "5511999999999"
+ *   "55 11 99999-9999"             → "5511999999999"
+ *   "447911123456"                 → "447911123456"    (não-BR, sem mudança)
+ *
+ * Danielle Gurgel, 2026-02-25
  */
 function normalizarTelefoneE164(phone: string): string {
   // Remove sufixo de JID (@s.whatsapp.net, @c.us, etc)
   const semJid = phone.split("@")[0];
   // Remove tudo que não for dígito
-  return semJid.replace(/\D/g, "");
+  const digitos = semJid.replace(/\D/g, "");
+
+  // Correção do 9° dígito para celulares brasileiros (Danielle Gurgel, 2026-02-25)
+  // JID do WhatsApp pode vir sem o 9: 55 + DDD(2) + 8 dígitos = 12 dígitos total
+  // Formato correto E.164:            55 + DDD(2) + 9 + 8 dígitos = 13 dígitos
+  if (digitos.length === 12 && digitos.startsWith("55")) {
+    return digitos.slice(0, 4) + "9" + digitos.slice(4);
+  }
+
+  return digitos;
+}
+
+/**
+ * Valida telefone normalizado: só dígitos, comprimento entre 10 (mínimo
+ * nacional sem código de país) e 15 (máximo E.164).
+ * Retorna true se válido. (Danielle Gurgel, 2026-02-25)
+ */
+function telefoneValido(telefoneNormalizado: string): boolean {
+  // Defesa extra: garante que é só dígitos (mesmo que normalizarTelefoneE164 já faça isso)
+  if (!/^\d+$/.test(telefoneNormalizado)) return false;
+  return telefoneNormalizado.length >= 10 && telefoneNormalizado.length <= 15;
+}
+
+/**
+ * Ofusca telefone para logs: "5511999999999" → "5511****99999".
+ * Preserva DDD (4 primeiros) e sufixo (5 últimos), mascara o meio.
+ * (Danielle Gurgel, 2026-02-25)
+ */
+function mascararTelefone(tel: string): string {
+  if (tel.length <= 8) {
+    return "****";
+  }
+  return tel.slice(0, 4) + "****" + tel.slice(-5);
+}
+
+/** Limita senderName a 100 caracteres para evitar payloads abusivos. */
+const MAX_SENDER_NAME = 100;
+function sanitizarNome(nome: string | undefined): string | undefined {
+  if (!nome) {
+    return undefined;
+  }
+  const limpo = nome.trim();
+  if (limpo.length <= MAX_SENDER_NAME) {
+    return limpo;
+  }
+  return limpo.slice(0, MAX_SENDER_NAME);
+}
+
+/** Limita texto de mensagem a 6000 caracteres (Chatwoot aceita mais, mas
+ *  previne payloads gigantes de input mal-formado). */
+const MAX_TEXTO_MSG = 6000;
+function sanitizarTexto(texto: string): string {
+  if (texto.length <= MAX_TEXTO_MSG) {
+    return texto;
+  }
+  return texto.slice(0, MAX_TEXTO_MSG) + "…[truncado]";
 }
 
 /**
  * Obtém a configuração do Chatwoot a partir do config geral do OpenClaw.
  * Retorna null se a integração estiver desabilitada ou incompleta.
  */
-function obterConfigChatwoot(
-  cfg: { integrations?: { chatwoot?: ChatwootConfig } },
-): ChatwootConfig | null {
+function obterConfigChatwoot(cfg: {
+  integrations?: { chatwoot?: ChatwootConfig };
+}): ChatwootConfig | null {
   const cw = cfg.integrations?.chatwoot;
   if (!cw?.enabled || !cw.baseUrl || !cw.apiToken || !cw.accountId || !cw.inboxId) {
     return null;
@@ -156,9 +280,15 @@ async function requisicaoChatwoot(
   }
 }
 
+// Guard de concorrência: se duas mensagens do mesmo número chegam ao mesmo tempo,
+// a segunda espera a primeira terminar em vez de criar contato duplicado.
+// (Danielle Gurgel, 2026-02-25)
+const contatoEmVoo = new Map<string, Promise<number>>();
+
 /**
  * Busca um contato no Chatwoot pelo telefone. Se não encontrar, cria um novo.
  * Usa cache em memória para evitar buscas repetidas.
+ * Guard de concorrência: dedup por Promise se já há uma busca em andamento.
  *
  * Lógica de negócio: cada número de WhatsApp corresponde a um contato no
  * Chatwoot. O contato é associado ao inbox (canal API) configurado.
@@ -168,42 +298,113 @@ async function buscarOuCriarContato(
   phone: string,
   name?: string,
 ): Promise<number> {
-  // Correção item 1: normaliza telefone ANTES de usar como chave do cache.
-  // Sem isso, "5511..." e "+5511..." criavam contatos duplicados.
   const telefoneNormalizado = normalizarTelefoneE164(phone);
 
-  // Correção item 7: usar !== undefined em vez de if (cached),
-  // porque id 0 (improvável mas possível) seria tratado como falsy.
-  const cached = cacheContatos.get(telefoneNormalizado);
-  if (cached !== undefined) return cached;
+  // Validação de comprimento (10-15 dígitos) — rejeita lixo antes de tocar API
+  if (!telefoneValido(telefoneNormalizado)) {
+    throw new Error(
+      `Telefone inválido após normalização: "${mascararTelefone(
+        telefoneNormalizado,
+      )}" (len=${telefoneNormalizado.length})`,
+    );
+  }
 
-  // Tenta buscar contato existente pela busca textual do Chatwoot
+  // Sanitiza nome se presente (max 100 chars)
+  const nomeSanitizado = sanitizarNome(name);
+
+  // Cache hit → retorno imediato
+  const cached = cacheContatos.get(telefoneNormalizado);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Guard de concorrência: se já há uma busca em andamento para este número,
+  // espera ela terminar em vez de disparar busca/criação paralela duplicada.
+  const emVoo = contatoEmVoo.get(telefoneNormalizado);
+  if (emVoo) {
+    return emVoo;
+  }
+
+  const promessa = buscarOuCriarContatoInterno(cw, telefoneNormalizado, nomeSanitizado);
+  contatoEmVoo.set(telefoneNormalizado, promessa);
   try {
-    const resultado = (await requisicaoChatwoot(
-      cw,
-      `/contacts/search?q=${encodeURIComponent(telefoneNormalizado)}&include_contacts=true`,
-      "GET",
-    )) as {
-      payload?: Array<{ id: number; phone_number?: string }>;
-    };
-    // Correção item 1: compara sempre com dígitos puros para evitar mismatch
-    const encontrado = resultado.payload?.find((c) => {
-      const telContato = c.phone_number?.replace(/\D/g, "") ?? "";
-      return telContato === telefoneNormalizado;
-    });
-    if (encontrado) {
-      cacheContatos.set(telefoneNormalizado, encontrado.id);
-      return encontrado.id;
+    return await promessa;
+  } finally {
+    contatoEmVoo.delete(telefoneNormalizado);
+  }
+}
+
+/** Implementação interna — separada para o guard de concorrência. */
+async function buscarOuCriarContatoInterno(
+  cw: ChatwootConfig,
+  telefoneNormalizado: string,
+  nomeSanitizado: string | undefined,
+): Promise<number> {
+  // ---------------------------------------------------------------------------
+  // FIX DE RAIZ (2026-02-25):
+  // O outbound chega como JID normalizado ("5511..."), mas o contato importado
+  // costuma estar salvo como "+5511...". A busca textual do Chatwoot pode falhar
+  // se o "q" não bater com o formato armazenado.
+  //
+  // Solução cirúrgica:
+  //   - Buscar de forma determinística com 2 queries: sem "+" e com "+"
+  //   - Validar match comparando SOMENTE dígitos (fone do contato vs normalizado)
+  //   - Se encontrar e houver "name", atualizar nome quando ele for vazio ou
+  //     quando ele for só o telefone (defesa adicional, sem depender de "cosmética")
+  // ---------------------------------------------------------------------------
+
+  const queries = [telefoneNormalizado, `+${telefoneNormalizado}`];
+
+  for (const q of queries) {
+    try {
+      const resultado = (await requisicaoChatwoot(
+        cw,
+        `/contacts/search?q=${encodeURIComponent(q)}&include_contacts=true`,
+        "GET",
+      )) as {
+        payload?: Array<{ id: number; name?: string; phone_number?: string }>;
+      };
+
+      const encontrado = resultado.payload?.find((c) => {
+        const telContato = (c.phone_number ?? "").replace(/\D/g, "");
+        return telContato === telefoneNormalizado;
+      });
+
+      if (encontrado) {
+        cacheContatos.set(telefoneNormalizado, encontrado.id);
+
+        // Defesa: se temos um nome real e o contato está com nome vazio
+        // ou nome = telefone, atualiza o nome (não bloqueia fluxo se falhar).
+        if (nomeSanitizado) {
+          const nomeAtual = (encontrado.name ?? "").trim();
+          const nomeAtualEhTelefone = nomeAtual.replace(/\D/g, "") === telefoneNormalizado;
+          const nomeVazio = nomeAtual.length === 0;
+
+          if (nomeVazio || nomeAtualEhTelefone) {
+            try {
+              await requisicaoChatwoot(cw, `/contacts/${encontrado.id}`, "PUT", {
+                name: nomeSanitizado,
+              });
+            } catch {
+              // best-effort — nunca quebra o espelhamento
+            }
+          }
+        }
+
+        return encontrado.id;
+      }
+    } catch {
+      // tenta próxima query
     }
-  } catch {
-    // Busca falhou — tenta criar
   }
 
   // Cria contato novo no Chatwoot (sempre com + na frente, padrão E.164)
   const contato = (await requisicaoChatwoot(cw, "/contacts", "POST", {
     inbox_id: cw.inboxId,
-    name: name || `+${telefoneNormalizado}`,
+    name: nomeSanitizado || `+${telefoneNormalizado}`,
     phone_number: `+${telefoneNormalizado}`,
+    // Identificador estável (opcional, mas ajuda futuras correções/migrações)
+    identifier: `wa:${telefoneNormalizado}`,
   })) as { payload?: { contact?: { id: number } } };
 
   const id = contato.payload?.contact?.id;
@@ -233,11 +434,9 @@ async function buscarOuCriarConversa(
 
   // Busca conversas abertas desse contato neste inbox
   try {
-    const convs = (await requisicaoChatwoot(
-      cw,
-      `/contacts/${contactId}/conversations`,
-      "GET",
-    )) as { payload?: Array<{ id: number; inbox_id: number; status: string }> };
+    const convs = (await requisicaoChatwoot(cw, `/contacts/${contactId}/conversations`, "GET")) as {
+      payload?: Array<{ id: number; inbox_id: number; status: string }>;
+    };
     const encontrada = convs.payload?.find(
       (c) => c.inbox_id === cw.inboxId && c.status !== "resolved",
     );
@@ -286,20 +485,28 @@ export function espelharMensagemEntrada(
   const cw = obterConfigChatwoot(cfg);
   if (!cw) return;
 
+  // Sanitiza inputs antes de enviar ao Chatwoot (Danielle Gurgel, 2026-02-25)
+  const nomeSafe = sanitizarNome(senderName);
+  const textoSafe = sanitizarTexto(text);
+
   // Fire-and-forget — erros só vão pro log, nunca bloqueiam o bot
   void (async () => {
     try {
-      const contactId = await buscarOuCriarContato(cw, phone, senderName);
+      const contactId = await buscarOuCriarContato(cw, phone, nomeSafe);
       const conversationId = await buscarOuCriarConversa(cw, contactId, phone);
       await requisicaoChatwoot(cw, `/conversations/${conversationId}/messages`, "POST", {
-        content: text,
+        content: textoSafe,
         message_type: "incoming",
         content_type: "text",
       });
     } catch (err) {
       // Correção item 10: log com stack para não perder detalhes do erro
       const detalheErro = err instanceof Error ? (err.stack ?? err.message) : String(err);
-      log.warn(`espelharMensagemEntrada falhou (${phone}): ${detalheErro}`);
+      log.warn(
+        `espelharMensagemEntrada falhou (${mascararTelefone(
+          normalizarTelefoneE164(phone),
+        )}): ${detalheErro}`,
+      );
     }
   })();
 }
@@ -323,7 +530,12 @@ export function espelharMensagemSaida(
   text: string,
 ): void {
   const cw = obterConfigChatwoot(cfg);
-  if (!cw || !text) return;
+  if (!cw || !text) {
+    return;
+  }
+
+  // Sanitiza texto antes de enviar ao Chatwoot (Danielle Gurgel, 2026-02-25)
+  const textoSafe = sanitizarTexto(text);
 
   // Fire-and-forget — erros só vão pro log, nunca bloqueiam o bot
   void (async () => {
@@ -331,16 +543,76 @@ export function espelharMensagemSaida(
       const contactId = await buscarOuCriarContato(cw, phone);
       const conversationId = await buscarOuCriarConversa(cw, contactId, phone);
       await requisicaoChatwoot(cw, `/conversations/${conversationId}/messages`, "POST", {
-        content: text,
+        content: textoSafe,
         message_type: "outgoing",
         content_type: "text",
       });
     } catch (err) {
       // Correção item 10: log com stack para não perder detalhes do erro
       const detalheErro = err instanceof Error ? (err.stack ?? err.message) : String(err);
-      log.warn(`espelharMensagemSaida falhou (${phone}): ${detalheErro}`);
+      log.warn(
+        `espelharMensagemSaida falhou (${mascararTelefone(
+          normalizarTelefoneE164(phone),
+        )}): ${detalheErro}`,
+      );
     }
   })();
+}
+
+// =============================================================================
+// Verificação HMAC-SHA256 para webhooks de handoff (Danielle Gurgel, 2026-02-25)
+// Aceita header no formato "sha256=<hex>" (padrão Meta) ou "<hex>" puro (Chatwoot).
+// O segredo é o hooks token do gateway — o mesmo que vai na URL do webhook.
+// =============================================================================
+
+/**
+ * Verifica assinatura HMAC-SHA256 do webhook de handoff.
+ * Deve ser chamada na camada HTTP (server-http.ts) com o rawBody ANTES do parse.
+ */
+export function verificarHmacHandoff(
+  rawBody: Buffer,
+  signatureHeader: string,
+  secret: string,
+): boolean {
+  const expected = signatureHeader.startsWith("sha256=")
+    ? signatureHeader.slice("sha256=".length)
+    : signatureHeader;
+  if (!expected || expected.length < 10) {
+    return false;
+  }
+  const computed = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(computed, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Helper definitivo (2026-02-25):
+ * - Verifica HMAC com rawBody
+ * - Só então faz JSON.parse
+ * - E delega para processarEventoHandoffChatwoot(payload)
+ *
+ * Isso permite que o handler HTTP use uma única chamada aqui e não esqueça a ordem correta.
+ */
+export async function processarEventoHandoffChatwootAssinado(
+  rawBody: Buffer,
+  signatureHeader: string,
+  secret: string,
+): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
+  if (!verificarHmacHandoff(rawBody, signatureHeader, secret)) {
+    return { ok: false, error: "assinatura inválida" };
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, unknown>;
+  } catch {
+    return { ok: false, error: "json inválido" };
+  }
+
+  return processarEventoHandoffChatwoot(payload);
 }
 
 // =============================================================================
@@ -396,19 +668,42 @@ const HANDOFF_CHATWOOT_MINUTOS = 1440; // 24h — o Resolver despausa antes
 export async function processarEventoHandoffChatwoot(
   payload: Record<string, unknown>,
 ): Promise<{ ok: true; action: string } | { ok: false; error: string }> {
-  // --- Valida evento ---
+  // -------------------------------------------------------------------------
+  // Validação estrita do payload (Danielle Gurgel, 2026-02-25)
+  // Garante que o payload tem a estrutura esperada de um webhook Chatwoot.
+  // Rejeita payloads malformados para evitar que alguém abuse do endpoint.
+  // -------------------------------------------------------------------------
+  if (typeof payload.event !== "string" || !payload.event) {
+    return { ok: false, error: "payload inválido: campo 'event' ausente ou não-string" };
+  }
+
   const evento = payload.event;
   if (evento !== "conversation_status_changed") {
     // Outros eventos: aceita mas ignora (para o Chatwoot não reenviar)
     return { ok: true, action: "ignorado" };
   }
 
-  // --- Extrai telefone do contato ---
+  // Valida que conversation existe e tem id numérico
+  const conversa = payload.conversation as { id?: unknown } | undefined;
+  if (!conversa || typeof conversa.id !== "number") {
+    log.warn("Webhook handoff rejeitado: campo 'conversation.id' ausente ou não-numérico");
+    return { ok: false, error: "payload inválido: conversation.id ausente" };
+  }
+
+  // --- Extrai e valida telefone do contato ---
   const contato = payload.contact as { phone_number?: string } | undefined;
-  const telefone = contato?.phone_number;
-  if (!telefone) {
+  if (!contato || typeof contato.phone_number !== "string") {
     log.debug("Webhook handoff ignorado: contato sem phone_number");
     return { ok: true, action: "ignorado:sem-telefone" };
+  }
+  const telefone = contato.phone_number;
+
+  const telefoneNorm = normalizarTelefoneE164(telefone);
+  if (!telefoneValido(telefoneNorm)) {
+    log.warn(
+      `Webhook handoff rejeitado: telefone inválido (norm="${mascararTelefone(telefoneNorm)}")`,
+    );
+    return { ok: false, error: "telefone inválido" };
   }
 
   // --- Mapeia status → ação de handoff ---
@@ -419,7 +714,11 @@ export async function processarEventoHandoffChatwoot(
     const telefoneNormalizado = normalizarTelefoneE164(telefone);
     await activateHandoff(telefoneNormalizado, "chatwoot:resolver", HANDOFF_CHATWOOT_MINUTOS);
     invalidarCacheConversa(telefone);
-    log.info(`Handoff ATIVADO via Chatwoot para ${telefoneNormalizado} (${HANDOFF_CHATWOOT_MINUTOS} min)`);
+    log.info(
+      `Handoff ATIVADO via Chatwoot para ${mascararTelefone(
+        telefoneNormalizado,
+      )} (${HANDOFF_CHATWOOT_MINUTOS} min)`,
+    );
     return { ok: true, action: "handoff-on" };
   }
 
@@ -427,7 +726,7 @@ export async function processarEventoHandoffChatwoot(
     // "Reabrir" → desativa handoff (bot volta a responder)
     const telefoneNormalizado = normalizarTelefoneE164(telefone);
     await deactivateHandoff(telefoneNormalizado);
-    log.info(`Handoff DESATIVADO via Chatwoot para ${telefoneNormalizado}`);
+    log.info(`Handoff DESATIVADO via Chatwoot para ${mascararTelefone(telefoneNormalizado)}`);
     return { ok: true, action: "handoff-off" };
   }
 

@@ -62,6 +62,58 @@ export function extractHookToken(req: IncomingMessage): string | undefined {
   return undefined;
 }
 
+/**
+ * Lê o body cru da requisição como Buffer.
+ * Útil quando se precisa do payload original para validação HMAC antes do parse.
+ * Timeout de 5s contra slowloris. (Danielle Gurgel, 2026-02-25)
+ */
+export async function readRawBody(
+  req: IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    let total = 0;
+    const chunks: Buffer[] = [];
+    const timeout = setTimeout(() => {
+      if (!done) {
+        done = true;
+        req.destroy();
+        resolve(null);
+      }
+    }, 5000);
+    req.on("data", (chunk: Buffer) => {
+      if (done) {
+        return;
+      }
+      total += chunk.length;
+      if (total > maxBytes) {
+        done = true;
+        clearTimeout(timeout);
+        req.destroy();
+        resolve(null);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      clearTimeout(timeout);
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", () => {
+      if (!done) {
+        done = true;
+        clearTimeout(timeout);
+        resolve(null);
+      }
+    });
+  });
+}
+
 export async function readJsonBody(
   req: IncomingMessage,
   maxBytes: number,
@@ -146,6 +198,10 @@ export type HookAgentPayload = {
   model?: string;
   thinking?: string;
   timeoutSeconds?: number;
+  /** Dados específicos do canal — passado para sendPayload da extensão (ex: template). */
+  channelData?: Record<string, unknown>;
+  /** ID do agente que deve processar o hook (ex: "fellipe", "dani"). */
+  agent?: string;
 };
 
 const listHookChannelValues = () => ["last", ...listChannelPlugins().map((plugin) => plugin.id)];
@@ -228,6 +284,14 @@ export function normalizeAgentPayload(
       model,
       thinking,
       timeoutSeconds,
+      channelData:
+        payload.channelData && typeof payload.channelData === "object" && !Array.isArray(payload.channelData)
+          ? (payload.channelData as Record<string, unknown>)
+          : undefined,
+      agent:
+        typeof payload.agent === "string" && payload.agent.trim()
+          ? payload.agent.trim()
+          : undefined,
     },
   };
 }
