@@ -1,0 +1,224 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<!--
+  Template base de email — Neurotrading
+  Criado por: Danielle Gurgel
+  Baseado no layout Stripo original
+
+  COMO USAR:
+  1. Copie este arquivo e renomeie (ex: convite-evento-marco.html)
+  2. Edite as seções marcadas com "EDITAR AQUI"
+  3. Cole no Mautic: Emails > Novo > Builder > Código fonte
+
+  TOKENS MAUTIC disponíveis:
+    {contactfield=firstname}  — primeiro nome do contato
+    {contactfield=lastname}   — sobrenome
+    {contactfield=email}      — email
+    {unsubscribe_text}        — link de descadastramento
+    {webview_url}              — ver no navegador
+-->
+<html dir="ltr" lang="pt" xmlns="http://www.w3.org/1999/xhtml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="UTF-8">
+  <meta content="width=device-width, initial-scale=1" name="viewport">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta content="telephone=no" name="format-detection">
+  <!-- EDITAR AQUI: título do email (aparece na aba do navegador) -->
+  <title>Neurotrading</title>
+  <!--[if (mso 16)]><style type="text/css">a {text-decoration: none;}</style><![endif]-->
+  <!--[if gte mso 9]><style>sup { font-size: 100% !important; }</style><![endif]-->
+  <!--[if gte mso 9]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:AllowPNG></o:AllowPNG>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style type="text/css">
+    /* =============================================
+       CORES NEUROTRADING — edite aqui pra mudar o tema
+       ============================================= */
+    :root {
+      --bg-principal: #0C0B0B;
+      --cor-texto: #FFFFFF;
+      --cor-botao: #d007a1;
+      --cor-botao-borda: #8407d2;
+      --cor-botao-hover: #012a4a;
+      --largura-max: 660px;
+    }
+
+    /* Reset e base */
+    body, table, td, p, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; border-collapse: collapse; border-spacing: 0px; }
+    img { display: block; border: 0; outline: none; text-decoration: none; }
+
+    /* Botão CTA */
+    .btn-cta {
+      border: 2px solid #8407d2;
+      background: #d007a1;
+      border-radius: 30px;
+      display: block;
+    }
+    .btn-cta a {
+      color: #FFFFFF !important;
+      text-decoration: none !important;
+      font-size: 32px;
+      font-family: helvetica, 'helvetica neue', arial, verdana, sans-serif;
+      padding: 15px 20px;
+      display: block;
+      text-align: center;
+      line-height: 38px;
+    }
+    .btn-cta:hover {
+      background: #012a4a !important;
+      border-color: #e150fa #e150fa #4cc9fe #4cc9fe !important;
+    }
+
+    /* Responsivo */
+    @media only screen and (max-width: 600px) {
+      .wrapper { width: 100% !important; }
+      .content-pad { padding-left: 15px !important; padding-right: 15px !important; }
+      .img-fluid { width: 100% !important; height: auto !important; }
+      h1 { font-size: 26px !important; }
+      .btn-cta a { font-size: 24px !important; padding: 12px 15px !important; }
+      .social-icon { width: 28px !important; }
+      .footer-text { font-size: 14px !important; }
+    }
+  </style>
+</head>
+<body style="width:100%;height:100%;padding:0;margin:0;background-color:#0C0B0B;">
+  <div style="background-color:#0C0B0B;">
+
+    <!-- =============================================
+         WRAPPER PRINCIPAL
+         ============================================= -->
+    <table width="100%" cellspacing="0" cellpadding="0" style="background-color:#0C0B0B;">
+      <tr>
+        <td align="center" style="padding:0;">
+
+          <!-- =============================================
+               BLOCO 1: HEADER / SAUDAÇÃO
+               ============================================= -->
+          <table class="wrapper" cellpadding="0" cellspacing="0" width="660" style="max-width:660px;">
+            <tr>
+              <!-- EDITAR AQUI: background-image do header (ou remova pra fundo sólido) -->
+              <td align="center"
+                  background="https://vrbsfq.stripocdn.email/content/guids/CABINET_c19af790dbdfedae7cff12273fab376b/images/backgroundemail.jpg"
+                  style="background-image:url(https://vrbsfq.stripocdn.email/content/guids/CABINET_c19af790dbdfedae7cff12273fab376b/images/backgroundemail.jpg);
+                         background-repeat:no-repeat;background-position:center top;background-size:cover;
+                         border-radius:30px 30px 0 0;
+                         padding:40px 20px 20px 20px;">
+
+                <!-- EDITAR AQUI: texto de saudação -->
+                <h1 style="margin:0;color:#FFFFFF;font-family:helvetica,'helvetica neue',arial,verdana,sans-serif;
+                           font-size:30px;line-height:40px;text-align:center;">
+                  Olá <strong>{contactfield=firstname}</strong>, anota aí!
+                </h1>
+
+              </td>
+            </tr>
+          </table>
+
+          <!-- =============================================
+               BLOCO 2: CONTEÚDO PRINCIPAL
+               ============================================= -->
+          <table class="wrapper" cellpadding="0" cellspacing="0" width="660" style="max-width:660px;">
+
+            <!-- EDITAR AQUI: imagem principal (banner do evento/campanha) -->
+            <tr>
+              <td align="center" style="padding:0;">
+                <img class="img-fluid" src="https://vrbsfq.stripocdn.email/content/guids/CABINET_1e5519ce8a8b4275a7e761be7e9ec9848df0d3b18c310dc0e31fe5795adbcbc2/images/minicurso_vieses_no_trading.jpg"
+                     alt="Neurotrading"
+                     width="660"
+                     style="display:block;width:100%;max-width:660px;height:auto;">
+              </td>
+            </tr>
+
+            <!-- EDITAR AQUI: texto do corpo (opcional — descomente se precisar)
+            <tr>
+              <td class="content-pad" style="padding:25px 40px;color:#FFFFFF;
+                         font-family:helvetica,'helvetica neue',arial,verdana,sans-serif;
+                         font-size:16px;line-height:26px;text-align:center;">
+                <p>Seu texto aqui. Use <strong>negrito</strong> e <a href="#" style="color:#e150fa;">links</a> à vontade.</p>
+              </td>
+            </tr>
+            -->
+
+            <!-- BOTÃO CTA -->
+            <tr>
+              <td align="center" style="padding:25px 60px 35px 60px;">
+                <div class="btn-cta">
+                  <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word"
+                    href="https://LINK-AQUI" style="height:65px;v-text-anchor:middle;width:500px"
+                    arcsize="41%" strokecolor="#8407d2" strokeweight="2px" fillcolor="#d007a1">
+                    <w:anchorlock/>
+                    <center style="color:#ffffff;font-family:helvetica,arial,sans-serif;font-size:32px;">
+                      TEXTO DO BOTÃO
+                    </center>
+                  </v:roundrect>
+                  <![endif]-->
+                  <!--[if !mso]><!-->
+                  <!-- EDITAR AQUI: link e texto do botão -->
+                  <a href="https://LINK-AQUI" target="_blank">Garanta sua vaga!</a>
+                  <!--<![endif]-->
+                </div>
+              </td>
+            </tr>
+
+          </table>
+
+          <!-- =============================================
+               BLOCO 3: FOOTER
+               ============================================= -->
+          <table class="wrapper" cellpadding="0" cellspacing="0" width="660" style="max-width:660px;">
+            <tr>
+              <td align="center" style="padding:20px;">
+
+                <!-- Redes sociais -->
+                <table cellpadding="0" cellspacing="0" style="margin-bottom:15px;">
+                  <tr>
+                    <td style="padding-right:20px;">
+                      <a href="https://www.facebook.com/daniellegurgelcoach/" target="_blank">
+                        <img class="social-icon" src="https://vrbsfq.stripocdn.email/content/assets/img/social-icons/rounded-white/facebook-rounded-white.png"
+                             alt="Facebook" width="32">
+                      </a>
+                    </td>
+                    <td style="padding-right:20px;">
+                      <a href="https://www.instagram.com/danielle_gurgel/" target="_blank">
+                        <img class="social-icon" src="https://vrbsfq.stripocdn.email/content/assets/img/social-icons/rounded-white/instagram-rounded-white.png"
+                             alt="Instagram" width="32">
+                      </a>
+                    </td>
+                    <td>
+                      <a href="https://www.youtube.com/c/NEUROTRADING" target="_blank">
+                        <img class="social-icon" src="https://vrbsfq.stripocdn.email/content/assets/img/social-icons/rounded-white/youtube-rounded-white.png"
+                             alt="YouTube" width="32">
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+
+                <!-- Texto do footer -->
+                <p class="footer-text" style="margin:0;color:#FFFFFF;font-family:helvetica,'helvetica neue',arial,verdana,sans-serif;
+                          font-size:14px;line-height:22px;text-align:center;">
+                  Se não quiser mais e-mails, vamos ficar com saudades mas entendemos.<br>
+                  {unsubscribe_text}<br><br>
+                  Neurotrading · São Paulo – SP | Brasil<br>
+                  Telefone: (11) 91558-2223
+                </p>
+
+              </td>
+            </tr>
+          </table>
+
+        </td>
+      </tr>
+    </table>
+
+  </div>
+</body>
+</html>
