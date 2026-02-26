@@ -8,6 +8,7 @@ type DeliveryPayload = {
   text?: string;
   mediaUrl?: string;
   mediaUrls?: string[];
+  channelData?: Record<string, unknown>;
 };
 
 export function pickSummaryFromOutput(text: string | undefined) {
@@ -48,9 +49,14 @@ export function isHeartbeatOnlyResponse(payloads: DeliveryPayload[], ackMaxChars
     return true;
   }
   return payloads.every((payload) => {
-    // If there's media, we should deliver regardless of text content.
+    // Se tem media ou channelData (ex.: template Meta), deve entregar.
     const hasMedia = (payload.mediaUrls?.length ?? 0) > 0 || Boolean(payload.mediaUrl);
     if (hasMedia) {
+      return false;
+    }
+    const hasChannelData =
+      payload.channelData != null && Object.keys(payload.channelData).length > 0;
+    if (hasChannelData) {
       return false;
     }
     // Use heartbeat mode to check if text is just HEARTBEAT_OK or short ack.
