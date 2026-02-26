@@ -82,7 +82,19 @@ Sem esse cron, webhooks do EspoCRM nunca disparam.
 - **Task.cCanal** — campo enum (WhatsApp/Email/Telefone), define canal de comunicação do robô
 - **CSessao** — registro de sessão de conversa (entidade customizada)
 
+## Memos de Contexto
+
+Quando trocar de contexto e voltar, leia estes arquivos para recuperar estado:
+- `MEMO-PROSPECCAO-OUTBOUND.md` — Sistema de prospecção outbound (template Meta, agente Fellipe, pipeline de delivery). Contém pegadinhas, estado atual e próximos passos.
+
 ## REGRAS IMPORTANTES
+
+### PROIBIDO desviar do plano acordado
+- NUNCA mudar a arquitetura ou o plano sem autorização explícita da Dani.
+- Se a Dani analisou um problema, desenhou uma solução e aprovou um plano, EXECUTE EXATAMENTE o que foi acordado.
+- NÃO criar atalhos, bypasses ou "gambiarras" que mudem quem faz o quê na arquitetura.
+- Se durante a implementação surgir uma dúvida ou alternativa, PARE e pergunte antes de desviar.
+- Incidente 2026-02-25: Dani pediu que o AGENTE montasse o template (composição inteligente das variáveis). Em vez disso, fiz o n8n montar o template pronto e o agente virou fantoche (texto descartado). Isso violou o plano aprovado e desperdiçou tempo. NÃO repetir.
 
 ### Diretórios — NUNCA jogar arquivos temporários no diretório do projeto (c:\dev\openclaw)
 - Scripts temporários (tmp_*) → rodar e apagar, ou salvar em `C:\Users\SAMSUNG\Documents\ALUNOS\` se for relatório
