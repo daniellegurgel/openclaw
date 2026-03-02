@@ -82,6 +82,12 @@ Sem esse cron, webhooks do EspoCRM nunca disparam.
 - **Task.cCanal** — campo enum (WhatsApp/Email/Telefone), define canal de comunicação do robô
 - **CSessao** — registro de sessão de conversa (entidade customizada)
 
+## Scripts de Operação
+
+| Script | Localização | Função |
+|--------|-------------|--------|
+| `relatorio-disparos.sh` | Server: `/root/relatorio-disparos.sh` / Git: `scripts-infraestrutura/scripts-de-manutencao/` | Relatório de disparos de template e respostas. Cruza envios (Cloud API 1404 + WhatsApp Web 2223) com respostas recebidas. Mostra taxa de resposta, quem respondeu (com nome e canal), e quem não respondeu. Uso: sem argumento = acumulado, com data = filtra dia. |
+
 ## Memos de Contexto
 
 Quando trocar de contexto e voltar, leia estes arquivos para recuperar estado:
@@ -96,7 +102,19 @@ Quando trocar de contexto e voltar, leia estes arquivos para recuperar estado:
 - Se durante a implementação surgir uma dúvida ou alternativa, PARE e pergunte antes de desviar.
 - Incidente 2026-02-25: Dani pediu que o AGENTE montasse o template (composição inteligente das variáveis). Em vez disso, fiz o n8n montar o template pronto e o agente virou fantoche (texto descartado). Isso violou o plano aprovado e desperdiçou tempo. NÃO repetir.
 
+### Workspace padrão — NÃO EXISTE MAIS (apagado 2026-02-26 00:10 BRT)
+
+- O diretório `/root/.openclaw/workspace` foi APAGADO em 2026-02-26.
+- NÃO recriar. O Fellipe (`/root/.openclaw/workspace-fellipe`) é o agente que responde no WhatsApp.
+- Se o OpenClaw reclamar de workspace faltando, apontar o default pro Fellipe no openclaw.json:
+  `agents.defaults.workspace = "/root/.openclaw/workspace-fellipe"`
+
+### NUNCA usar npm install -g (desde 2026-02-25)
+
+- `npm install -g` pode desinstalar outros pacotes globais (ex: n8n foi desinstalado por isso em 2026-02-25).
+- Para instalar binários (gog, etc), usar download direto do GitHub Releases.
+
 ### Diretórios — NUNCA jogar arquivos temporários no diretório do projeto (c:\dev\openclaw)
-- Scripts temporários (tmp_*) → rodar e apagar, ou salvar em `C:\Users\SAMSUNG\Documents\ALUNOS\` se for relatório
-- CSVs de exportação/relatório → `C:\Users\SAMSUNG\Documents\ALUNOS\`
+- Scripts temporários (tmp_*) → rodar e apagar
 - O diretório `c:\dev\openclaw` é SÓ para código do projeto OpenClaw
+- Qualquer arquivo que a Dani precise pegar (CSVs, relatórios, exportações, planilhas) → pasta Documentos ($HOME/Documents/)
