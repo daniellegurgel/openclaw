@@ -226,12 +226,36 @@ function sanitizarTexto(texto: string): string {
 /**
  * Obtém a configuração do Chatwoot a partir do config geral do OpenClaw.
  * Retorna null se a integração estiver desabilitada ou incompleta.
+ * Exige inboxId — usada pelas funções de espelhamento que precisam criar
+ * contatos e conversas (buscarOuCriarContato, buscarOuCriarConversa).
  */
 function obterConfigChatwoot(cfg: {
   integrations?: { chatwoot?: ChatwootConfig };
 }): ChatwootConfig | null {
   const cw = cfg.integrations?.chatwoot;
   if (!cw?.enabled || !cw.baseUrl || !cw.apiToken || !cw.accountId || !cw.inboxId) {
+    return null;
+  }
+  return cw;
+}
+
+/**
+ * Obtém config mínima do Chatwoot para envio direto de mensagem.
+ * NÃO exige inboxId — enviar mensagem numa conversa já existente
+ * só precisa de baseUrl + apiToken + accountId.
+ *
+ * CORREÇÃO 2026-03-11 (revisão externa):
+ *   enviarMensagemChatwoot usava obterConfigChatwoot que exige inboxId.
+ *   Isso bloqueava o envio se inboxId não estivesse configurado, mesmo
+ *   que para envio direto ele não seja necessário.
+ *
+ * (Danielle Gurgel — Neurotrading, 2026-03-11)
+ */
+function obterConfigChatwootEnvio(cfg: {
+  integrations?: { chatwoot?: ChatwootConfig };
+}): ChatwootConfig | null {
+  const cw = cfg.integrations?.chatwoot;
+  if (!cw?.enabled || !cw.baseUrl || !cw.apiToken || !cw.accountId) {
     return null;
   }
   return cw;
@@ -557,6 +581,113 @@ export function espelharMensagemSaida(
       );
     }
   })();
+}
+
+// =============================================================================
+// ENVIO DIRETO DE MENSAGEM — Canal de entrada do widget
+// =============================================================================
+// (Danielle Gurgel — Neurotrading, 2026-03-11)
+//
+// Contexto de negócio:
+//   Quando um visitante envia mensagem pelo widget do site, o handler do
+//   canal de entrada (neurotrading-chatwoot-canal-entrada.ts) processa a
+//   mensagem via agente IA e precisa ENVIAR A RESPOSTA DE VOLTA ao Chatwoot.
+//   Diferente do espelhamento (fire-and-forget), aqui precisamos saber se
+//   o envio deu certo — por isso retorna Promise com resultado.
+//
+// Contexto técnico:
+//   Usa a mesma requisicaoChatwoot helper que o espelhamento.
+//   POST /conversations/{id}/messages com message_type "outgoing".
+//   A mensagem aparece no widget do visitante como resposta do agente.
+// =============================================================================
+
+/** Tipo de erro retornado por enviarMensagemChatwoot quando ok=false. */
+export type ErroEnvioChatwoot = "config" | "invalid_input" | "http" | "timeout" | "network";
+
+/**
+ * Envia uma mensagem para uma conversa no Chatwoot.
+ * Usado pelo canal de entrada do widget para responder ao visitante.
+ *
+ * Diferente de espelharMensagemSaida (que é fire-and-forget e busca/cria contato),
+ * esta função envia DIRETAMENTE para uma conversa já existente (pelo ID).
+ * O chamador já tem o conversationId do webhook — não precisa buscar nada.
+ *
+ * CORREÇÃO 2026-03-11 (revisão externa):
+ *   - Usa obterConfigChatwootEntrada em vez de obterConfigChatwoot.
+ *     obterConfigChatwoot exige inboxId, que é necessário para criar contatos/conversas
+ *     (espelhamento), mas NÃO para enviar mensagem numa conversa já existente.
+ *     Envio direto só precisa de baseUrl + apiToken + accountId.
+ *   - Retorna tipo de erro tipado (ErroEnvioChatwoot) para o chamador poder
+ *     decidir o que fazer (retry em timeout, ignorar em config, etc).
+ *
+ * @param cfg            - Config geral do OpenClaw (precisa ter integrations.chatwoot)
+ * @param conversationId - ID numérico da conversa no Chatwoot
+ * @param texto          - Texto da mensagem a enviar
+ * @returns              - { ok: true, messageId } se enviou, { ok: false, error } se falhou
+ *
+ * (Danielle Gurgel — Neurotrading, 2026-03-11)
+ */
+export async function enviarMensagemChatwoot(
+  cfg: { integrations?: { chatwoot?: ChatwootConfig } },
+  conversationId: number,
+  texto: string,
+): Promise<{ ok: true; messageId?: number } | { ok: false; error: ErroEnvioChatwoot }> {
+  // CORREÇÃO: usa config mínima (sem exigir inboxId).
+  // Para enviar mensagem numa conversa existente, só precisamos de baseUrl + apiToken + accountId.
+  const cw = obterConfigChatwootEnvio(cfg);
+  if (!cw) {
+    log.warn("enviarMensagemChatwoot: integração Chatwoot não configurada/habilitada");
+    return { ok: false, error: "config" };
+  }
+
+  // Validação de entrada — defesa contra chamadas com dados inválidos
+  if (typeof conversationId !== "number" || conversationId <= 0) {
+    log.warn(`enviarMensagemChatwoot: conversationId inválido (${conversationId})`);
+    return { ok: false, error: "invalid_input" };
+  }
+
+  const textoSafe = sanitizarTexto(texto);
+  if (!textoSafe.trim()) {
+    log.warn("enviarMensagemChatwoot: texto vazio após sanitização");
+    return { ok: false, error: "invalid_input" };
+  }
+
+  try {
+    const resultado = (await requisicaoChatwoot(
+      cw,
+      `/conversations/${conversationId}/messages`,
+      "POST",
+      {
+        content: textoSafe,
+        message_type: "outgoing",
+        content_type: "text",
+      },
+    )) as { id?: number } | null;
+
+    const messageId = resultado?.id;
+    log.info(
+      `enviarMensagemChatwoot: mensagem enviada para conv=${conversationId} ` +
+      `(messageId=${messageId ?? "?"}, ${textoSafe.length} chars)`,
+    );
+    return { ok: true, messageId: messageId ?? undefined };
+  } catch (err) {
+    // Classificar o tipo de erro para o chamador poder decidir o que fazer
+    let tipoErro: ErroEnvioChatwoot = "network";
+    if (err instanceof Error) {
+      if (err.name === "AbortError") {
+        tipoErro = "timeout";
+      } else if (err.message.includes("→ 4") || err.message.includes("→ 5")) {
+        // Erros HTTP 4xx/5xx vêm formatados como "Chatwoot POST /path → 401: ..."
+        tipoErro = "http";
+      }
+    }
+
+    log.warn(
+      `enviarMensagemChatwoot falhou (conv=${conversationId}, tipo=${tipoErro}): ` +
+      `${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { ok: false, error: tipoErro };
+  }
 }
 
 // =============================================================================

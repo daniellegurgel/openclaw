@@ -42,7 +42,7 @@ import {
 import { loadConfig } from "../config/config.js";
 import { handleSlackHttpRequest } from "../slack/http/index.js";
 // Ponte Chatwoot: handoff via botões Resolver/Reabrir (Danielle Gurgel, 2026-02-20)
-import { processarEventoHandoffChatwootAssinado } from "../integrations/ponte-chatwoot.js";
+import { processarEventoHandoffChatwootAssinado, processarEventoHandoffChatwoot } from "../integrations/ponte-chatwoot.js";
 import { authorizeGatewayConnect, isLocalDirectRequest, type ResolvedGatewayAuth } from "./auth.js";
 import {
   handleControlUiAvatarRequest,
@@ -194,6 +194,19 @@ export function createHooksRequestHandler(
       return await handleMetaWhatsAppWebhook(req, res, { url, logHooks });
     }
 
+    // -------------------------------------------------------------------
+    // Canal de entrada Chatwoot — webhook do AgentBot para mensagens do widget.
+    // O Chatwoot AgentBot NÃO envia Bearer token nos webhooks — só faz POST
+    // direto na URL. Por isso precisa entrar ANTES do token check.
+    // Segurança: URL acessível apenas via localhost (Chatwoot e gateway no
+    // mesmo servidor). Faz sua própria leitura de body (proteção slowloris).
+    // (Danielle Gurgel — Neurotrading, 2026-03-11)
+    // -------------------------------------------------------------------
+    if (rawSubPath === "chatwoot-inbound") {
+      const { handleChatwootInboundWebhook } = await import("./neurotrading-chatwoot-canal-entrada.js");
+      return await handleChatwootInboundWebhook(req, res, { url, logHooks });
+    }
+
     if (url.searchParams.has("token")) {
       res.statusCode = 400;
       res.setHeader("Content-Type", "text/plain; charset=utf-8");
@@ -244,15 +257,28 @@ export function createHooksRequestHandler(
         return true;
       }
 
+      // HMAC é opcional: se o Chatwoot enviar X-Chatwoot-Signature, validamos.
+      // Se não enviar, aceitamos mesmo assim — o token no path (/hooks/handoff/<token>)
+      // já autenticou a requisição. O Chatwoot regular webhooks nem sempre têm
+      // signing configurado. (Danielle Gurgel, 2026-03-12)
       const sigHeader = req.headers["x-chatwoot-signature"] ?? req.headers["x-openclaw-signature"];
       const sig = Array.isArray(sigHeader) ? sigHeader[0] : sigHeader;
-      if (!sig) {
-        logHooks.warn("Handoff: header de assinatura ausente");
-        sendJson(res, 401, { ok: false, error: "assinatura ausente" });
-        return true;
-      }
 
-      const result = await processarEventoHandoffChatwootAssinado(rawBody, sig, hooksConfig.token);
+      let result: { ok: true; action: string } | { ok: false; error: string };
+      if (sig) {
+        // Com assinatura: valida HMAC + parse + processa
+        result = await processarEventoHandoffChatwootAssinado(rawBody, sig, hooksConfig.token);
+      } else {
+        // Sem assinatura: parse + processa (token no path já autenticou)
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, unknown>;
+        } catch {
+          sendJson(res, 400, { ok: false, error: "json inválido" });
+          return true;
+        }
+        result = await processarEventoHandoffChatwoot(payload);
+      }
       const status = result.ok ? 200 : (result.error === "assinatura inválida" ? 401 : 400);
       sendJson(res, status, result);
       return true;
