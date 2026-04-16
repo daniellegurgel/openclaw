@@ -2,7 +2,7 @@ AGENTS.md
 
 ## Projeto: OpenClaw (Neurotrading)
 
-- Desenvolvedora: Danielle Gurgel (chamar de Dani)
+- Desenvolvedora: Danielle Gurgel 
 - Documentação e comentários no código: sempre em português
 - Atribuição nos comentários: Danielle Gurgel
 
